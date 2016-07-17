@@ -11,8 +11,9 @@ int is_client = 1;
 static void usage(const char*);
 static void err_msg(const char*, ...);
 static void err_doit(const char*, va_list);
+static int cliopen(char*, char*);
 
-int main(int argc, char* const argv[])
+int main(int argc, char* argv[])
 {
 	int c;
 	while((c = getopt(argc, argv, "s")) != EOF) {
