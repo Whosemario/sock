@@ -21,6 +21,7 @@ static void err_sys(const char*, ...);
 static void err_doit(int, const char*, va_list);
 static int cliopen(char*, char*);
 static int servopen(char*, char*);
+static void loop(int);
 
 int main(int argc, char* argv[])
 {
