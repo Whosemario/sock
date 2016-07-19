@@ -7,6 +7,7 @@
 #include <netinet/in.h>  // htons
 #include <errno.h>    // errno?
 #include <strings.h>  // bzero
+#include <sys/select.h>  // select
 
 #define MAXLINE 4096
 
@@ -14,6 +15,8 @@
 int is_client = 1;
 int udp = 0;
 int listenq = 5;
+int buffer_size = 1024;
+char* rbuf = NULL;
 
 static void usage(const char*);
 static void err_msg(const char*, ...);
@@ -21,6 +24,7 @@ static void err_sys(const char*, ...);
 static void err_doit(int, const char*, va_list);
 static int cliopen(char*, char*);
 static int servopen(char*, char*);
+static void buffers(int);
 static void loop(int);
 
 int main(int argc, char* argv[])
@@ -90,6 +94,9 @@ cliopen(char* host, char* port) {
 	if(connect(fd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0) {
 		err_sys("call connect() error");
 	}
+
+	buffers(fd);
+	
 	return fd;
 }
 
@@ -118,6 +125,8 @@ servopen(char* host, char* port) {
 		err_sys("call socket() error");
 	}
 
+	buffers(fd);
+
 	listen(fd, listenq);
 
 	for(;;) {
@@ -126,6 +135,30 @@ servopen(char* host, char* port) {
 		return new_fd;
 	}
 	return -1;
+}
+
+static void
+buffers(int sock_fd) {
+	if(rbuf == NULL)
+		rbuf = (char*)malloc(buffer_size);
+}
+
+static void
+loop(int sock_fd) {
+	fd_set rset;
+	int max_fd = sock_fd + 1;
+	int stdineof = 0;
+
+	FD_ZERO(&fd_set);
+
+	for(;;) {
+		if(stdineof == 0) 
+			FD_SET(STDIN_FILENO, &rset);
+		FD_SET(sock_fd, &rset);
+		if(select(max_fd, &rset, NULL, NULL, NULL) < 0)
+			err_sys("call select() failed");
+		if(FD_ISSET())
+	}
 }
 
 static void
