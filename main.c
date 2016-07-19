@@ -13,6 +13,7 @@
 /* global vars */
 int is_client = 1;
 int udp = 0;
+int listenq = 5;
 
 static void usage(const char*);
 static void err_msg(const char*, ...);
@@ -96,7 +97,34 @@ cliopen(char* host, char* port) {
 static int
 servopen(char* host, char* port) {
 	int fd;
-	return fd;
+	struct sockaddr_in serv_addr, cli_addr;
+	unsigned long addr_t;
+	int new_fd;
+
+	// init serv_addr
+	bzero((char*)&serv_addr, sizeof(serv_addr));
+	serv_addr.sin_family = AF_INET;
+	serv_addr.sin_port = htons(atoi(port));
+	if(host) {
+		if((addr_t = inet_addr(host)) == 0xFFFFFFFF)
+			err_sys("call inet_addr() error");
+		serv_addr.sin_addr.s_addr = addr_t;
+	} else {
+		serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+	}
+
+	if((fd = socket(AF_INET, udp ? SOCK_DGRAM : SOCK_STREAM, 0)) < 0) {
+		err_sys("call socket() error");
+	}
+
+	listen(fd, listenq);
+
+	for(;;) {
+		if((new_fd = accept(fd, (struct sockaddr *)&cli_addr, sizeof(cli_addr))) < 0)
+			err_sys("call accept() error");
+		return new_fd;
+	}
+	return -1;
 }
 
 static void
@@ -133,7 +161,7 @@ static void
 err_doit(int errnoflag, const char* fmt, va_list ap) {
 	char buf[MAXLINE];
 	vsprintf(buf, fmt, ap);
-	int error_save = -1;
+	int error_save = errno;
 	if(errnoflag) 
 		sprintf(buf + strlen(buf), " : %s", strerror(error_save));
 	strcat(buf, "\n");
