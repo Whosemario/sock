@@ -15,7 +15,7 @@
 int is_client = 1;
 int udp = 0;
 int listenq = 5;
-int buffer_size = 1024;
+int readlen = 1024;
 char* rbuf = NULL;
 
 static void usage(const char*);
@@ -64,6 +64,9 @@ int main(int argc, char* argv[])
 	} else {
 		sock_fd = servopen(host, port);
 	}
+
+	loop(sock_fd);
+
 	return 0;
 }
 
@@ -108,6 +111,7 @@ servopen(char* host, char* port) {
 	struct sockaddr_in serv_addr, cli_addr;
 	unsigned long addr_t;
 	int new_fd;
+	int cli_size;
 
 	// init serv_addr
 	bzero((char*)&serv_addr, sizeof(serv_addr));
@@ -127,10 +131,14 @@ servopen(char* host, char* port) {
 
 	buffers(fd);
 
+	if(bind(fd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0)
+		err_sys("call bind() error");
+
 	listen(fd, listenq);
 
 	for(;;) {
-		if((new_fd = accept(fd, (struct sockaddr *)&cli_addr, sizeof(cli_addr))) < 0)
+		cli_size = sizeof(cli_addr);
+		if((new_fd = accept(fd, (struct sockaddr *)&cli_addr, &cli_size)) < 0)
 			err_sys("call accept() error");
 		return new_fd;
 	}
@@ -140,7 +148,7 @@ servopen(char* host, char* port) {
 static void
 buffers(int sock_fd) {
 	if(rbuf == NULL)
-		rbuf = (char*)malloc(buffer_size);
+		rbuf = (char*)malloc(readlen);
 }
 
 static void
@@ -148,8 +156,9 @@ loop(int sock_fd) {
 	fd_set rset;
 	int max_fd = sock_fd + 1;
 	int stdineof = 0;
+	int nread;
 
-	FD_ZERO(&fd_set);
+	FD_ZERO(&rset);
 
 	for(;;) {
 		if(stdineof == 0) 
@@ -157,8 +166,34 @@ loop(int sock_fd) {
 		FD_SET(sock_fd, &rset);
 		if(select(max_fd, &rset, NULL, NULL, NULL) < 0)
 			err_sys("call select() failed");
-		if(FD_ISSET())
+		if(FD_ISSET(STDIN_FILENO, &rset)) {
+			if((nread = read(STDIN_FILENO, rbuf, readlen)) < 0) {
+				err_sys("call read() error");
+			} else if(nread == 0) {
+				stdineof = 1;
+				fputs("bye.\n", stderr);
+				break;
+			} else {
+				if(write(sock_fd, rbuf, nread) != nread)
+					err_sys("call write() error");
+			}
+		}
+		if(FD_ISSET(sock_fd, &rset)) {
+			if((nread = read(sock_fd, rbuf, readlen)) < 0) {
+				err_sys("call read() error");
+			} else if(nread == 0) {
+				fputs("client close.\nbye.\n", stderr);
+				break;
+			} else {
+				if(write(STDOUT_FILENO, rbuf, nread) != nread) {
+					err_sys("call write() error");
+				}
+			}
+		}
 	}
+
+	if(close(sock_fd) < 0)
+		err_sys("call close() error");
 }
 
 static void
