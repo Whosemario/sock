@@ -17,6 +17,7 @@ int udp = 0;
 int listenq = 5;
 int readlen = 1024;
 char* rbuf = NULL;
+int debug = 0;
 
 static void usage(const char*);
 static void err_msg(const char*, ...);
@@ -26,14 +27,18 @@ static int cliopen(char*, char*);
 static int servopen(char*, char*);
 static void buffers(int);
 static void loop(int);
+static void sockopts(int, int);
 
 int main(int argc, char* argv[])
 {
 	int c;
-	while((c = getopt(argc, argv, "s")) != EOF) {
+	while((c = getopt(argc, argv, "sD")) != EOF) {
 		switch(c) {
 		case 's':
 			is_client = 0;
+			break;
+		case 'D':
+			debug = 1;
 			break;
 		case '?':
 			usage("");
@@ -93,13 +98,14 @@ cliopen(char* host, char* port) {
 		err_sys("call socket() error");
 	}
 
+	buffers(fd);
+	sockopts(fd, 0);
+
 	// try to connect
 	if(connect(fd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0) {
 		err_sys("call connect() error");
 	}
 
-	buffers(fd);
-	
 	return fd;
 }
 
@@ -129,11 +135,11 @@ servopen(char* host, char* port) {
 		err_sys("call socket() error");
 	}
 
-	buffers(fd);
-
 	if(bind(fd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0)
 		err_sys("call bind() error");
 
+	buffers(fd);
+	sockopts(fd, 0);
 	listen(fd, listenq);
 
 	for(;;) {
@@ -149,6 +155,22 @@ static void
 buffers(int sock_fd) {
 	if(rbuf == NULL)
 		rbuf = (char*)malloc(readlen);
+}
+
+static void
+sockopts(int sock_fd, int doall) {
+	if(debug) {
+		int option, optlen;
+		option = 1;
+		if(setsockopt(sock_fd, SOL_SOCKET, SO_DEBUG, (char*)&option, sizeof(option)) < 0)
+			err_sys("call setsockopt() error");
+		option = 0;
+		optlen = sizeof(option);
+		if(getsockopt(sock_fd, SOL_SOCKET, SO_DEBUG, (char*)&option, &optlen) < 0)
+			err_sys("call getsockopt() error");
+		if(option == 0)
+			err_sys("SO_DEBUG not set (%d)", option);
+	}
 }
 
 static void
@@ -230,7 +252,7 @@ static void
 err_doit(int errnoflag, const char* fmt, va_list ap) {
 	char buf[MAXLINE];
 	vsprintf(buf, fmt, ap);
-	int error_save = errno;
+	int error_save = -1; //errno;
 	if(errnoflag) 
 		sprintf(buf + strlen(buf), " : %s", strerror(error_save));
 	strcat(buf, "\n");
