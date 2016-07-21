@@ -40,6 +40,9 @@ int main(int argc, char* argv[])
 		case 'D':
 			debug = 1;
 			break;
+		case 'u':
+			udp = 1;
+			break;
 		case '?':
 			usage("");
 			break;
@@ -224,6 +227,9 @@ usage(const char* msg) {
 	err_msg(
 "usage: sock [options] <host> <post>            (for client; default)\n"
 "       sock [options] -s [<ipAddr>] <port>     (for server)\n"
+"options: -s operate as server instead of client\n"
+"         -D use SO_DEBUG\n"
+"         -u use UDP instead of TCP\n"
 );
 
 	err_msg(msg);
