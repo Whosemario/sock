@@ -32,7 +32,7 @@ static void sockopts(int, int);
 int main(int argc, char* argv[])
 {
 	int c;
-	while((c = getopt(argc, argv, "sD")) != EOF) {
+	while((c = getopt(argc, argv, "sDu")) != EOF) {
 		switch(c) {
 		case 's':
 			is_client = 0;
@@ -142,7 +142,10 @@ servopen(char* host, char* port) {
 		err_sys("call bind() error");
 
 	buffers(fd);
-	sockopts(fd, 0);
+	sockopts(fd, udp ? 1 : 0);
+
+	if(udp) return fd;
+
 	listen(fd, listenq);
 
 	for(;;) {
@@ -182,6 +185,8 @@ loop(int sock_fd) {
 	int max_fd = sock_fd + 1;
 	int stdineof = 0;
 	int nread;
+	struct sockaddr_in cliaddr;
+	int clilen;
 
 	FD_ZERO(&rset);
 
@@ -204,15 +209,24 @@ loop(int sock_fd) {
 			}
 		}
 		if(FD_ISSET(sock_fd, &rset)) {
-			if((nread = read(sock_fd, rbuf, readlen)) < 0) {
-				err_sys("call read() error");
-			} else if(nread == 0) {
-				fputs("client close.\nbye.\n", stderr);
-				break;
-			} else {
-				if(write(STDOUT_FILENO, rbuf, nread) != nread) {
-					err_sys("call write() error");
+			if(udp && is_client == 0) {
+				clilen = sizeof(cliaddr);
+				if((nread = recvfrom(sock_fd, rbuf, readlen, 0, (struct sockaddr*)&cliaddr, &clilen)) < 0) {
+					err_sys("call recvfrom() error");
+				} else if(nread == 0) {
+					fputs("client close(udp).\nbye.\n", stderr);
+					break;
 				}
+			} else {
+				if((nread = read(sock_fd, rbuf, readlen)) < 0) {
+					err_sys("call read() error");
+				} else if(nread == 0) {
+					fputs("client close.\nbye.\n", stderr);
+					break;
+				}
+			}
+			if(write(STDOUT_FILENO, rbuf, nread) != nread) {
+				err_sys("call write() error");
 			}
 		}
 	}
