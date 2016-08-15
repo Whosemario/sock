@@ -1,282 +1,275 @@
-#include <stdio.h>
-#include <unistd.h>
-#include <string.h>    // strcat
-#include <stdarg.h>    // getopt 
-#include <stdlib.h>    // exit
-#include <sys/socket.h>  // socket
-#include <netinet/in.h>  // htons
-#include <errno.h>    // errno?
-#include <strings.h>  // bzero
-#include <sys/select.h>  // select
 
-#define MAXLINE 4096
+#include	"sock.h"
 
-/* global vars */
-int is_client = 1;
-int udp = 0;
-int listenq = 5;
-int readlen = 1024;
-char* rbuf = NULL;
-int debug = 0;
+/* define global variables 
+ * È«¾Ö±äÁ¿
+ */
+char	*host;
+char	*port;
 
-static void usage(const char*);
-static void err_msg(const char*, ...);
-static void err_sys(const char*, ...);
-static void err_doit(int, const char*, va_list);
-static int cliopen(char*, char*);
-static int servopen(char*, char*);
-static void buffers(int);
-static void loop(int);
-static void sockopts(int, int);
+int		bindport;			/* 0 or TCP or UDP port number to bind */
+int		broadcast;			/* SO_BROADCAST */
+int		cbreak;				/* set terminal to cbreak mode */
+int		client = 1;			/* acting as client is the default */
+int		crlf;				/* convert newline to CR/LF & vice versa */
+int		debug;				/* SO_DEBUG */
+int		dofork;				/* concurrent server, do a fork() */
+char	foreignip[32];		/* foreign IP address, dotted-decimal string */
+int		foreignport;		/* foreign port number */
+int		halfclose;			/* TCP half close option */
+int		keepalive;			/* SO_KEEPALIVE */
+long	linger = -1;		/* 0 or positive turns on option */
+int		listenq = 5;		/* listen queue for TCP Server */
+int		nodelay;			/* TCP_NODELAY (Nagle algorithm) */
+int		nbuf = 1024;		/* number of buffers to write (sink mode) */
+int		pauseclose;			/* seconds to sleep after recv FIN, before close */
+int		pauseinit;			/* seconds to sleep before first read */
+int		pauselisten;		/* seconds to sleep after listen() */
+int		pauserw;			/* seconds to sleep before each read or write */
+int		reuseaddr;			/* SO_REUSEADDR */
 
-int main(int argc, char* argv[])
+int		readlen = 1024;		/* default read length for socket */
+int		writelen = 1024;	/* default write length for socket */
+int		recvdstaddr;		/* IP_RECVDSTADDR option */
+// ÓÃ -R£¬-SÑ¡ÏîÉèÖÃsocketµÄÊÕ·¢»º³åÇø´óÐ¡
+int		rcvbuflen;			/* size for SO_RCVBUF */
+int		sndbuflen;			/* size for SO_SNDBUF */
+
+// µ¥ÀýÄ£Ê½£¬Ó¦ÓÃ²ãÊÕ·¢»º³åÇøµÄ·ÖÅä
+char   *rbuf;				/* pointer that is malloc'ed */
+char   *wbuf;				/* pointer that is malloc'ed */
+// ×÷Îª·þÎñÆ÷Æô¶¯
+int		server;				/* to act as server requires -s option */
+int		sourcesink;			/* source/sink mode */
+
+/* Ä¬ÈÏÊÇTCPÁ¬½Ó£¬Òª×¨ÃÅÖ¸¶¨ use UDP instead of TCP */
+int		udp;				
+int		urgwrite;			/* write urgent byte after this write */
+int		verbose;
+
+static void	usage(const char *);
+
+int
+main(int argc, char *argv[])
 {
-	int c;
-	while((c = getopt(argc, argv, "sDu")) != EOF) {
-		switch(c) {
-		case 's':
-			is_client = 0;
+	int		c, fd;
+	char	*ptr;
+
+	if (argc < 2)
+		usage("");
+
+	opterr = 0;		/* don't want getopt() writing to stderr */
+	while ( (c = getopt(argc, argv, "b:cf:hin:p:q:r:suvw:ABCDEFKL:NO:P:Q:R:S:U:")) != EOF) {
+		switch (c) {
+		case 'b':
+			bindport = atoi(optarg);
 			break;
-		case 'D':
-			debug = 1;
+
+		case 'c':			/* convert newline to CR/LF & vice versa */
+			crlf = 1;
 			break;
-		case 'u':
+
+		case 'f':			/* foreign IP address and port#: a.b.c.d.p */
+			if ( (ptr = strrchr(optarg, '.')) == NULL)
+				usage("invalid -f option");
+
+			*ptr++ = 0;					/* null replaces final period */
+			foreignport = atoi(ptr);	/* port number */
+			strcpy(foreignip, optarg);	/* save dotted-decimal IP */
+			break;
+
+		case 'h':			/* TCP half-close option */
+			halfclose = 1;
+			break;
+
+		case 'i':			/* source/sink option */
+			sourcesink = 1;
+			break;
+
+		case 'n':			/* number of buffers to write */
+			nbuf = atol(optarg);
+			break;
+
+		case 'p':			/* pause before each read or write */
+			pauserw = atoi(optarg);
+			break;
+
+		case 'q':			/* listen queue for TCP server */
+			listenq = atoi(optarg);
+			break;
+
+		case 'r':			/* read() length */
+			readlen = atoi(optarg);
+			break;
+
+		case 's':			/* server */
+			server = 1;
+			client = 0;
+			break;
+
+		case 'u':			/* use UDP instead of TCP */
 			udp = 1;
 			break;
-		case '?':
-			usage("");
+
+		case 'v':			/* output what's going on */
+			verbose = 1;
 			break;
+
+		case 'w':			/* write() length */
+			writelen = atoi(optarg);
+			break;
+
+		case 'A':			/* SO_REUSEADDR socket option */
+			reuseaddr = 1;
+			break;
+
+		case 'B':			/* SO_BROADCAST socket option */
+			broadcast = 1;
+			break;
+
+		case 'C':			/* set standard input to cbreak mode */
+			cbreak = 1;
+			break;
+
+		case 'D':			/* SO_DEBUG socket option */
+			debug = 1;
+			break;
+
+		case 'E':			/* IP_RECVDSTADDR socket option */
+			recvdstaddr = 1;
+			break;
+
+		case 'F':			/* concurrent server, do a fork() */
+			dofork = 1;
+			break;
+
+		case 'K':			/* SO_KEEPALIVE socket option */
+			keepalive = 1;
+			break;
+
+		case 'L':			/* SO_LINGER socket option */
+			linger = atol(optarg);
+			break;
+
+		case 'N':			/* SO_NODELAY socket option */
+			nodelay = 1;
+			break;
+
+		case 'O':			/* pause before listen(), before first accept() */
+			pauselisten = atoi(optarg);
+			break;
+
+		case 'P':			/* pause before first read() */
+			pauseinit = atoi(optarg);
+			break;
+
+		case 'Q':			/* pause after receiving FIN, but before close() */
+			pauseclose = atoi(optarg);
+			break;
+
+		case 'R':			/* SO_RCVBUF socket option */
+			rcvbuflen = atoi(optarg);
+			break;
+
+		case 'S':			/* SO_SNDBUF socket option */
+			sndbuflen = atoi(optarg);
+			break;
+
+		case 'U':			/* when to write urgent byte */
+			urgwrite = atoi(optarg);
+			break;
+
+		case '?':
+			usage("unrecognized option");
 		}
 	}
 
-	char* host, *port;
+		/* check for options that don't make sense */
+	if (udp && halfclose)
+		usage("can't specify -h and -u");
+	if (udp && debug)
+		usage("can't specify -D and -u");
+	if (udp && linger >= 0)
+		usage("can't specify -L and -u");
+	if (udp && nodelay)
+		usage("can't specify -N and -u");
+	if (udp == 0 && broadcast)
+		usage("can't specify -B with TCP");
+	if (udp == 0 && foreignip[0] != 0)
+		usage("can't specify -f with TCP");
 
-	if(is_client) {
-		if(optind != argc - 2) 
-			usage("missing <host> <port> options");
+	if (client) {
+		if (optind != argc-2)
+			usage("missing <hostname> and/or <port>");
 		host = argv[optind];
-		port = argv[optind + 1];
+		port = argv[optind+1];
+
 	} else {
-		if(optind == argc - 2) {
+			/* If server specifies host and port, then local address is
+			   bound to the "host" argument, instead of being wildcarded. */
+		// Ö´ÐÐgetopt½âÎöÁËÑ¡ÏîÖ®ºó£¬optindÖ¸ÏòºóÃæµÄÑ¡Ïî²ÎÊý£¬¿´ÊÇ·ñÖÆ¶¨ÁËÖ÷»úÃûºÍ¶Ë¿Ú
+		if (optind == argc-2) {
 			host = argv[optind];
-			port = argv[optind + 1];
-		} else if(optind == argc - 1) {
+			port = argv[optind+1];
+		} else if (optind == argc-1) {
+			host = NULL;
 			port = argv[optind];
-		} else {
-			usage("missing <port> option");
-		}
-	}
-	int sock_fd;
-	if(is_client) {
-		sock_fd = cliopen(host, port);
-	} else {
-		sock_fd = servopen(host, port);
+		} else
+			usage("missing <port>");
 	}
 
-	loop(sock_fd);
+	if (client)
+		fd = cliopen(host, port);
+	else
+		fd = servopen(host, port);
 
-	return 0;
-}
+	if (sourcesink)
+		sink(fd);			/* ignore stdin/stdout */
+	else
+		loop(fd);			/* copy stdin/stdout to/from socket */
 
-/*  åˆ›å»ºå®¢æˆ·ç«¯
- */
-static int
-cliopen(char* host, char* port) {
-	int fd;
-	struct sockaddr_in serv_addr;
-	unsigned long addr_t;
-
-	// init serv_addr
-	bzero((char*)&serv_addr, sizeof(serv_addr));
-	serv_addr.sin_family = AF_INET;
-	serv_addr.sin_port = htons(atoi(port));
-
-	if((addr_t = inet_addr(host)) != 0xFFFFFFFF) {
-		bcopy((char*)&addr_t, (char*)&serv_addr.sin_addr, sizeof(addr_t));
-	} else {
-		err_sys("call inet_addr() error");
-	}
-
-	if((fd = socket(AF_INET, udp ? SOCK_DGRAM : SOCK_STREAM, 0)) < 0) {
-		err_sys("call socket() error");
-	}
-
-	buffers(fd);
-	sockopts(fd, 0);
-
-	// try to connect
-	if(connect(fd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0) {
-		err_sys("call connect() error");
-	}
-
-	return fd;
-}
-
-/*  åˆ›å»ºæœåŠ¡ç«¯
- */
-static int
-servopen(char* host, char* port) {
-	int fd;
-	struct sockaddr_in serv_addr, cli_addr;
-	unsigned long addr_t;
-	int new_fd;
-	int cli_size;
-
-	// init serv_addr
-	bzero((char*)&serv_addr, sizeof(serv_addr));
-	serv_addr.sin_family = AF_INET;
-	serv_addr.sin_port = htons(atoi(port));
-	if(host) {
-		if((addr_t = inet_addr(host)) == 0xFFFFFFFF)
-			err_sys("call inet_addr() error");
-		serv_addr.sin_addr.s_addr = addr_t;
-	} else {
-		serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-	}
-
-	if((fd = socket(AF_INET, udp ? SOCK_DGRAM : SOCK_STREAM, 0)) < 0) {
-		err_sys("call socket() error");
-	}
-
-	if(bind(fd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0)
-		err_sys("call bind() error");
-
-	buffers(fd);
-	sockopts(fd, udp ? 1 : 0);
-
-	if(udp) return fd;
-
-	listen(fd, listenq);
-
-	for(;;) {
-		cli_size = sizeof(cli_addr);
-		if((new_fd = accept(fd, (struct sockaddr *)&cli_addr, &cli_size)) < 0)
-			err_sys("call accept() error");
-		return new_fd;
-	}
-	return -1;
+	exit(0);
 }
 
 static void
-buffers(int sock_fd) {
-	if(rbuf == NULL)
-		rbuf = (char*)malloc(readlen);
-}
-
-static void
-sockopts(int sock_fd, int doall) {
-	if(debug) {
-		int option, optlen;
-		option = 1;
-		if(setsockopt(sock_fd, SOL_SOCKET, SO_DEBUG, (char*)&option, sizeof(option)) < 0)
-			err_sys("call setsockopt() error");
-		option = 0;
-		optlen = sizeof(option);
-		if(getsockopt(sock_fd, SOL_SOCKET, SO_DEBUG, (char*)&option, &optlen) < 0)
-			err_sys("call getsockopt() error");
-		if(option == 0)
-			err_sys("SO_DEBUG not set (%d)", option);
-	}
-}
-
-static void
-loop(int sock_fd) {
-	fd_set rset;
-	int max_fd = sock_fd + 1;
-	int stdineof = 0;
-	int nread;
-	struct sockaddr_in cliaddr;
-	int clilen;
-
-	FD_ZERO(&rset);
-
-	for(;;) {
-		if(stdineof == 0) 
-			FD_SET(STDIN_FILENO, &rset);
-		FD_SET(sock_fd, &rset);
-		if(select(max_fd, &rset, NULL, NULL, NULL) < 0)
-			err_sys("call select() failed");
-		if(FD_ISSET(STDIN_FILENO, &rset)) {
-			if((nread = read(STDIN_FILENO, rbuf, readlen)) < 0) {
-				err_sys("call read() error");
-			} else if(nread == 0) {
-				stdineof = 1;
-				fputs("bye.\n", stderr);
-				break;
-			} else {
-				if(write(sock_fd, rbuf, nread) != nread)
-					err_sys("call write() error");
-			}
-		}
-		if(FD_ISSET(sock_fd, &rset)) {
-			if(udp && is_client == 0) {
-				clilen = sizeof(cliaddr);
-				if((nread = recvfrom(sock_fd, rbuf, readlen, 0, (struct sockaddr*)&cliaddr, &clilen)) < 0) {
-					err_sys("call recvfrom() error");
-				} else if(nread == 0) {
-					fputs("client close(udp).\nbye.\n", stderr);
-					break;
-				}
-			} else {
-				if((nread = read(sock_fd, rbuf, readlen)) < 0) {
-					err_sys("call read() error");
-				} else if(nread == 0) {
-					fputs("client close.\nbye.\n", stderr);
-					break;
-				}
-			}
-			if(write(STDOUT_FILENO, rbuf, nread) != nread) {
-				err_sys("call write() error");
-			}
-		}
-	}
-
-	if(close(sock_fd) < 0)
-		err_sys("call close() error");
-}
-
-static void
-usage(const char* msg) {
-
+usage(const char *msg)
+{
 	err_msg(
-"usage: sock [options] <host> <post>            (for client; default)\n"
-"       sock [options] -s [<ipAddr>] <port>     (for server)\n"
-"options: -s operate as server instead of client\n"
-"         -D use SO_DEBUG\n"
-"         -u use UDP instead of TCP\n"
+"usage: sock [ options ] <host> <port>              (for client; default)\n"
+"       sock [ options ] -s [ <IPaddr> ] <port>     (for server)\n"
+"       sock [ options ] -i <host> <port>           (for \"source\" client)\n"
+"       sock [ options ] -i -s [ <IPaddr> ] <port>  (for \"sink\" server)\n"
+"options: -b n	bind n as client's local port number\n"
+"         -c    convert newline to CR/LF & vice versa\n"
+"         -f a.b.c.d.p  foreign IP address = a.b.c.d, foreign port# = p\n"
+"         -h    issue TCP half close on standard input EOF\n"
+"         -i    \"source\" data to socket, \"sink\" data from socket (w/-s)\n"
+"         -n n  #buffers to write for \"source\" client (default 1024)\n"
+"         -p n  #seconds to pause before each read or write (source/sink)\n"
+"         -q n  size of listen queue for TCP server (default 5)\n"
+"         -r n  #bytes per read() for \"sink\" server (default 1024)\n"
+"         -s    operate as server instead of client\n"
+"         -u    use UDP instead of TCP\n"
+"         -v    verbose\n"
+"         -w n  #bytes per write() for \"source\" client (default 1024)\n"
+"         -A    SO_REUSEADDR option\n"
+"         -B    SO_BROADCAST option\n"
+"         -C    set terminal to cbreak mode\n"
+"         -D    SO_DEBUG option\n"
+"         -E    IP_RECVDSTADDR option\n"
+"         -F    fork after connection accepted (TCP concurrent server)\n"
+"         -K    SO_KEEPALIVE option\n"
+"         -L n  SO_LINGER option, n = linger time\n"
+"         -N    TCP_NODELAY option\n"
+"         -O n  #seconds to pause after listen, but before first accept\n"
+"         -P n  #seconds to pause before first read or write (source/sink)\n"
+"         -Q n  #seconds to pause after receiving FIN, but before close\n"
+"         -R n  SO_RCVBUF option\n"
+"         -S n  SO_SNDBUF option\n"
+"         -U n  enter urgent mode after write number n (source only)"
 );
 
-	err_msg(msg);
+	if (msg[0] != 0)
+		err_quit("%s", msg);
 	exit(1);
-}
-
-static void 
-err_msg(const char* fmt, ...) {
-	va_list ap;
-	va_start(ap, fmt);
-	err_doit(0, fmt, ap);
-	va_end(ap);
-	return;
-}
-
-static void
-err_sys(const char* fmt, ...) {
-	va_list ap;
-	va_start(ap, fmt);
-	err_doit(1, fmt, ap);
-	va_end(ap);
-	exit(1);
-}
-
-static void
-err_doit(int errnoflag, const char* fmt, va_list ap) {
-	char buf[MAXLINE];
-	vsprintf(buf, fmt, ap);
-	int error_save = -1; //errno;
-	if(errnoflag) 
-		sprintf(buf + strlen(buf), " : %s", strerror(error_save));
-	strcat(buf, "\n");
-	fflush(stdout);
-	fputs(buf, stderr);
-	fflush(stderr);
 }

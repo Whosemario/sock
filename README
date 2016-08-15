@@ -1,4 +1,14 @@
-TCP/IP v1 sock program
----
 
-实现一个类似于TCP/IP卷1中使用的sock程序
+
+	This is the useful "sock" program in W. Richard Stevens <TCP/IP v1>
+
+	fork from https://github.com/vonzhou/sock 
+
+1. Open a tcp server :
+	$ ./sock -s <host/ip> <service/port>
+and open a client to test it:
+	$ ./sock <host/ip> <service/port>
+2. Act as s UDP server
+ 	$ ./sock -u -s  <host/ip> <service/port>
+3. "-A" to set the SO_REUSEADDR
+
